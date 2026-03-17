@@ -5,7 +5,13 @@ from __future__ import annotations
 import os
 
 import pandas as pd
-from catboost import CatBoostClassifier, config as cb_config
+from catboost import CatBoostClassifier
+
+try:
+    from catboost.utils import get_gpu_device_count
+except Exception:  # catboost<1.2 compatibility
+    def get_gpu_device_count() -> int:  # type: ignore
+        return 0
 
 from src.platform.core.dataset import Dataset
 
@@ -102,7 +108,7 @@ class SimpleBlendRanker:
             "sources",
         ]
 
-        task_type = "GPU" if cb_config.get_gpu_device_count() > 0 else "CPU"
+        task_type = "GPU" if get_gpu_device_count() > 0 else "CPU"
         devices = os.environ.get("CUDA_VISIBLE_DEVICES")
         model = CatBoostClassifier(
             iterations=120,
