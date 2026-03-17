@@ -20,14 +20,27 @@ class UserAuthorGenerator:
 
     name = "user_author"
 
-    def __init__(self, author_smoothing: float = 1.0, show_progress: bool = False) -> None:
+    def __init__(
+        self,
+        author_smoothing: float = 1.0,
+        decay_weight: float = 0.7,
+        recent_days: int = 30,
+        ratio_weight: float = 0.2,
+        show_progress: bool = False,
+    ) -> None:
         """Store hyperparameters used by author-based scoring.
 
         Args:
             author_smoothing: Additive prior for each author-edition edge.
+            decay_weight: Blend between time-decayed and static user profiles.
+            recent_days: Window for recency popularity boost.
+            ratio_weight: Weight for recent/all popularity ratio boost.
             show_progress: Whether to display per-user tqdm updates.
         """
         self.author_smoothing = author_smoothing
+        self.decay_weight = decay_weight
+        self.recent_days = recent_days
+        self.ratio_weight = ratio_weight
         self.show_progress = show_progress
 
     def generate(
@@ -51,19 +64,49 @@ class UserAuthorGenerator:
             Candidate DataFrame with required schema and source name.
         """
         del seed
-        user_profile = features[features["feature_type"] == "user_author_profile"][
+        user_profile_static = features[features["feature_type"] == "user_author_profile"][
             ["user_id", "author_id", "value"]
         ].copy()
-        if user_profile.empty:
+        user_profile_decay = features[features["feature_type"] == "user_author_profile_decay"][
+            ["user_id", "author_id", "value"]
+        ].copy()
+
+        if user_profile_static.empty and user_profile_decay.empty:
             return pd.DataFrame(columns=["user_id", "edition_id", "score", "source"])
 
-        edition_pop = features[features["feature_type"] == "edition_popularity_all"][
+        user_profile = user_profile_decay.rename(columns={"value": "decay"}).merge(
+            user_profile_static.rename(columns={"value": "static"}),
+            on=["user_id", "author_id"],
+            how="outer",
+        ).fillna(0.0)
+        user_profile["value"] = (
+            user_profile["decay"] * self.decay_weight
+            + user_profile["static"] * (1.0 - self.decay_weight)
+        )
+        user_profile = user_profile[["user_id", "author_id", "value"]]
+
+        pop_all = features[features["feature_type"] == "edition_popularity_all"][
             ["edition_id", "value"]
         ].copy()
-        pop_map = {
-            int(row["edition_id"]): float(row["value"])
-            for row in edition_pop.to_dict(orient="records")
-        }
+        pop_recent = features[features["feature_type"] == f"edition_popularity_{self.recent_days}d"][
+            ["edition_id", "value"]
+        ].copy()
+        pop_ratio = features[
+            features["feature_type"] == f"edition_popularity_ratio_{self.recent_days}d_all"
+        ][["edition_id", "value"]].copy()
+        pop_recent_map = {int(r.edition_id): float(r.value) for r in pop_recent.itertuples()}
+        pop_ratio_map = {int(r.edition_id): float(r.value) for r in pop_ratio.itertuples()}
+        pop_map = {}
+        for row in pop_all.itertuples():
+            eid = int(row.edition_id)
+            base = float(row.value)
+            recent = pop_recent_map.get(eid, 0.0)
+            ratio = pop_ratio_map.get(eid, 0.0)
+            pop_map[eid] = (
+                base * (1.0 - self.decay_weight)
+                + recent * self.decay_weight
+                + ratio * self.ratio_weight
+            )
 
         author_to_edition = dataset.catalog_df[["edition_id", "author_id"]].copy()
         author_to_edition["pop"] = author_to_edition["edition_id"].map(pop_map).fillna(0.0)
@@ -110,4 +153,3 @@ class UserAuthorGenerator:
                     }
                 )
         return pd.DataFrame(rows, columns=["user_id", "edition_id", "score", "source"])
-
