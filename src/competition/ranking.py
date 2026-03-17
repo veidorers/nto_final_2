@@ -61,8 +61,8 @@ class SimpleBlendRanker:
             filtered.groupby(["user_id", "edition_id"], as_index=False)
             .agg(final_score=("final_score", "sum"), sources=("source", "nunique"))
         )
-        # Small bonus for items hitting multiple sources
-        agg["final_score"] = agg["final_score"] * (1.0 + 0.05 * (agg["sources"] - 1))
+        # Boost items surfaced by multiple generators more aggressively
+        agg["final_score"] = agg["final_score"] * (1.0 + 0.15 * (agg["sources"] - 1))
         blended = agg.sort_values(
             ["user_id", "final_score", "edition_id"], ascending=[True, False, True]
         )
