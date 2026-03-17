@@ -7,7 +7,7 @@ pipeline:
   recent_days: 30
 
 candidates:
-  per_generator_k: 200
+  per_generator_k: 400
   generators:
     - name: global_popularity
       params: {}
@@ -20,10 +20,9 @@ candidates:
 
 ranking:
   source_weights:
-    global_popularity: 1.0
-    user_genre: 1.0
-    user_author: 1.0
+    global_popularity: 0.6
+    user_genre: 1.2
+    user_author: 1.3
 
 validation:
   pseudo_incident_days: 14
-

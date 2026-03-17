@@ -24,9 +24,9 @@ class UserGenrePopularityGenerator:
     def __init__(
         self,
         genre_smoothing: float = 1.0,
-        decay_weight: float = 0.7,
+        decay_weight: float = 0.8,
         recent_days: int = 30,
-        ratio_weight: float = 0.2,
+        ratio_weight: float = 0.5,
         show_progress: bool = False,
     ) -> None:
         """Store hyperparameters controlling user-genre scoring.

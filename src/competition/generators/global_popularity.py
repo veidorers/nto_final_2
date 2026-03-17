@@ -24,8 +24,8 @@ class GlobalPopularityGenerator:
 
     def __init__(
         self,
-        recent_weight: float = 0.7,
-        ratio_weight: float = 0.3,
+        recent_weight: float = 0.8,
+        ratio_weight: float = 0.5,
         recent_days: int = 30,
         show_progress: bool = False,
     ) -> None:
