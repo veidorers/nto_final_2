@@ -65,6 +65,16 @@ class SimpleBlendRanker:
         ]
         candidates = candidates.merge(edition_stats, on="edition_id", how="left")
 
+        edition_pop = (
+            dataset.seen_positive_df.groupby("edition_id").size().rename("edition_pop").reset_index()
+        )
+        user_hist = (
+            dataset.seen_positive_df.groupby("user_id").size().rename("user_hist").reset_index()
+        )
+        candidates = candidates.merge(edition_pop, on="edition_id", how="left")
+        candidates = candidates.merge(user_hist, on="user_id", how="left")
+        candidates[["edition_pop", "user_hist"]] = candidates[["edition_pop", "user_hist"]].fillna(0)
+
         # Subsample negatives per user
         sampled = []
         for user_id, group in candidates.groupby("user_id"):
@@ -85,12 +95,15 @@ class SimpleBlendRanker:
             "sum_score_max",
             "max_score_mean",
             "max_score_max",
+            "edition_pop",
+            "user_hist",
+            "sources",
         ]
 
         model = CatBoostClassifier(
-            iterations=80,
+            iterations=120,
             depth=6,
-            learning_rate=0.1,
+            learning_rate=0.08,
             eval_metric="AUC",
             verbose=False,
             random_seed=42,
