@@ -7,6 +7,7 @@ from collections.abc import Callable
 from src.competition.generators.global_popularity import GlobalPopularityGenerator
 from src.competition.generators.user_author import UserAuthorGenerator
 from src.competition.generators.user_genre import UserGenrePopularityGenerator
+from src.competition.generators.tfidf_knn import TfidfKnnGenerator
 
 GeneratorFactory = Callable[[dict[str, float], bool], object]
 
@@ -30,10 +31,21 @@ def _build_user_author(params: dict[str, float], tqdm_enabled: bool) -> object:
     )
 
 
+def _build_tfidf_knn(params: dict[str, float], tqdm_enabled: bool) -> object:
+    return TfidfKnnGenerator(
+        max_features=int(params.get("max_features", 20000)),
+        ngram_max=int(params.get("ngram_max", 2)),
+        n_neighbors=int(params.get("n_neighbors", 120)),
+        history_limit=int(params.get("history_limit", 5)),
+        show_progress=tqdm_enabled,
+    )
+
+
 GENERATOR_REGISTRY: dict[str, GeneratorFactory] = {
     "global_popularity": _build_global_popularity,
     "user_genre": _build_user_genre,
     "user_author": _build_user_author,
+    "tfidf_knn": _build_tfidf_knn,
 }
 
 
@@ -57,4 +69,3 @@ def build_generator(name: str, params: dict[str, float], tqdm_enabled: bool = Fa
         available = ", ".join(sorted(GENERATOR_REGISTRY))
         raise ValueError(f"Unknown generator name: {name}. Available: {available}") from exc
     return factory(params, tqdm_enabled)
-

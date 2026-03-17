@@ -17,12 +17,20 @@ candidates:
     - name: user_author
       params:
         author_smoothing: 1.0
+    - name: tfidf_knn
+      params:
+        max_features: 5000
+        ngram_max: 1
+        n_neighbors: 40
+        history_limit: 2
+        top_editions: 50000
 
 ranking:
   source_weights:
     global_popularity: 0.35
     user_genre: 1.6
     user_author: 1.8
+    tfidf_knn: 1.4
 
 validation:
   pseudo_incident_days: 14
