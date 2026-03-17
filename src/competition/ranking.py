@@ -55,10 +55,16 @@ class SimpleBlendRanker:
             return self._fallback_only(dataset, k)
 
         filtered = self._apply_weights(filtered)
-        blended = (
-            filtered.groupby(["user_id", "edition_id"], as_index=False)["final_score"]
-            .max()
-            .sort_values(["user_id", "final_score", "edition_id"], ascending=[True, False, True])
+
+        # Aggregate by summing weighted scores; duplicates across sources reinforce rank.
+        agg = (
+            filtered.groupby(["user_id", "edition_id"], as_index=False)
+            .agg(final_score=("final_score", "sum"), sources=("source", "nunique"))
+        )
+        # Small bonus for items hitting multiple sources
+        agg["final_score"] = agg["final_score"] * (1.0 + 0.05 * (agg["sources"] - 1))
+        blended = agg.sort_values(
+            ["user_id", "final_score", "edition_id"], ascending=[True, False, True]
         )
 
         selected = blended.groupby("user_id", group_keys=False).head(k).copy()
@@ -169,4 +175,3 @@ def rank_predictions(
         source_weights={key: float(value) for key, value in source_weights.items()}
     )
     return ranker.rank(dataset=dataset, candidates=candidates, k=int(k))
-
