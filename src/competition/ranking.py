@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pandas as pd
+from catboost import CatBoostClassifier
 
 from src.platform.core.dataset import Dataset
 
@@ -29,6 +30,75 @@ class SimpleBlendRanker:
         weighted["weight"] = weighted["source"].map(self.source_weights).fillna(1.0)
         weighted["final_score"] = weighted["score"] * weighted["weight"]
         return weighted
+
+    def _train_ml_reranker(self, dataset: Dataset, candidates: pd.DataFrame) -> pd.DataFrame:
+        """Train a lightweight CatBoost classifier on in-batch positives vs negatives.
+
+        Labels: pairs observed in full interactions are treated as positives.
+        Negatives are subsampled per user to keep training fast.
+        """
+        if candidates.empty:
+            return candidates
+
+        seen_pairs = set(
+            tuple(x)
+            for x in dataset.seen_positive_df[["user_id", "edition_id"]].drop_duplicates().to_numpy()
+        )
+        candidates = candidates.copy()
+        candidates["label"] = [
+            1 if (int(u), int(e)) in seen_pairs else 0
+            for u, e in zip(candidates["user_id"], candidates["edition_id"])
+        ]
+
+        # Feature engineering: aggregate statistics per edition
+        edition_stats = (
+            candidates.groupby("edition_id")[["sum_score", "max_score"]]
+            .agg(["mean", "max"])
+            .reset_index()
+        )
+        edition_stats.columns = [
+            "edition_id",
+            "sum_score_mean",
+            "sum_score_max",
+            "max_score_mean",
+            "max_score_max",
+        ]
+        candidates = candidates.merge(edition_stats, on="edition_id", how="left")
+
+        # Subsample negatives per user
+        sampled = []
+        for user_id, group in candidates.groupby("user_id"):
+            pos = group[group["label"] == 1]
+            neg = group[group["label"] == 0]
+            if not pos.empty:
+                n_neg = min(len(neg), len(pos) * 20)
+                neg = neg.sample(n=n_neg, random_state=42) if n_neg < len(neg) else neg
+            sampled.append(pd.concat([pos, neg], ignore_index=True))
+        train_df = pd.concat(sampled, ignore_index=True)
+        if train_df["label"].sum() == 0:
+            return candidates
+
+        feature_cols = [
+            "sum_score",
+            "max_score",
+            "sum_score_mean",
+            "sum_score_max",
+            "max_score_mean",
+            "max_score_max",
+        ]
+
+        model = CatBoostClassifier(
+            iterations=80,
+            depth=6,
+            learning_rate=0.1,
+            eval_metric="AUC",
+            verbose=False,
+            random_seed=42,
+        )
+        model.fit(train_df[feature_cols], train_df["label"])
+        pred = model.predict_proba(candidates[feature_cols])[:, 1]
+        candidates["final_score"] = pred
+        return candidates
 
     def rank(self, dataset: Dataset, candidates: pd.DataFrame, k: int) -> pd.DataFrame:
         """Rank candidates and produce exactly top-k rows per user.
@@ -59,11 +129,17 @@ class SimpleBlendRanker:
         # Aggregate by summing weighted scores; duplicates across sources reinforce rank.
         agg = (
             filtered.groupby(["user_id", "edition_id"], as_index=False)
-            .agg(final_score=("final_score", "sum"), sources=("source", "nunique"))
+            .agg(
+                sum_score=("final_score", "sum"),
+                max_score=("final_score", "max"),
+                sources=("source", "nunique"),
+            )
         )
         # Boost items surfaced by multiple generators more aggressively
-        agg["final_score"] = agg["final_score"] * (1.0 + 0.15 * (agg["sources"] - 1))
-        blended = agg.sort_values(
+        agg["final_score"] = agg["sum_score"] * (1.0 + 0.25 * (agg["sources"] - 1))
+        # ML rerank
+        reranked = self._train_ml_reranker(dataset, agg)
+        blended = reranked.sort_values(
             ["user_id", "final_score", "edition_id"], ascending=[True, False, True]
         )
 
