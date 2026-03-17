@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
 import pandas as pd
-from catboost import CatBoostClassifier
+from catboost import CatBoostClassifier, config as cb_config
 
 from src.platform.core.dataset import Dataset
 
@@ -100,6 +102,8 @@ class SimpleBlendRanker:
             "sources",
         ]
 
+        task_type = "GPU" if cb_config.get_gpu_device_count() > 0 else "CPU"
+        devices = os.environ.get("CUDA_VISIBLE_DEVICES")
         model = CatBoostClassifier(
             iterations=120,
             depth=6,
@@ -107,6 +111,8 @@ class SimpleBlendRanker:
             eval_metric="AUC",
             verbose=False,
             random_seed=42,
+            task_type=task_type,
+            devices=devices if task_type == "GPU" and devices else None,
         )
         model.fit(train_df[feature_cols], train_df["label"])
         pred = model.predict_proba(candidates[feature_cols])[:, 1]
